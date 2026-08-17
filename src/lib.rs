@@ -1,8 +1,5 @@
 use common_game::{
-    components::resource::{
-        ComplexResourceRequest, ComplexResourceType,
-        GenericResource::{self, BasicResources},
-    },
+    components::resource::{ComplexResourceType, GenericResource::BasicResources},
     protocols::{
         orchestrator_explorer::{ExplorerToOrchestrator::*, OrchestratorToExplorer::*, *},
         planet_explorer::{PlanetToExplorer::*, *},
@@ -12,7 +9,7 @@ use common_game::{
 use crossbeam_channel::{Receiver, Sender};
 use explorer_common::Bag;
 use explorer_common::Explorer as ExplorerTrait;
-struct Explorer {
+pub struct Explorer {
     id: ID,
     bag: Bag,
     planet_id: ID,
@@ -23,6 +20,26 @@ struct Explorer {
     tx_orchestrator: Sender<ExplorerToOrchestrator<Bag>>,
 }
 impl Explorer {
+    pub fn new(
+        id: ID,
+        bag: Bag,
+        planet_id: ID,
+        rx_planet: Receiver<PlanetToExplorer>,
+        tx_planet: Sender<ExplorerToPlanet>,
+        rx_orchestrator: Receiver<OrchestratorToExplorer>,
+        tx_orchestrator: Sender<ExplorerToOrchestrator<Bag>>,
+    ) -> Self {
+        Self {
+            id,
+            bag: bag,
+            planet_id,
+            auto_mode: false,
+            rx_planet,
+            tx_planet,
+            rx_orchestrator,
+            tx_orchestrator,
+        }
+    }
     pub fn is_combination_available(&self, resource: ComplexResourceType) -> bool {
         if let Ok(()) = self
             .tx_planet
