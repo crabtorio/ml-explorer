@@ -10,17 +10,8 @@ use common_game::{
     utils::ID,
 };
 use crossbeam_channel::{Receiver, Sender};
-struct Bag {
-    resources: Vec<GenericResource>,
-}
-impl Bag {
-    fn new() -> Self {
-        Bag {
-            resources: Vec::new(),
-        }
-    }
-}
-
+use explorer_common::Bag;
+use explorer_common::Explorer as ExplorerTrait;
 struct Explorer {
     id: ID,
     bag: Bag,
@@ -31,7 +22,6 @@ struct Explorer {
     rx_orchestrator: Receiver<OrchestratorToExplorer>,
     tx_orchestrator: Sender<ExplorerToOrchestrator<Bag>>,
 }
-
 impl Explorer {
     pub fn is_combination_available(&self, resource: ComplexResourceType) -> bool {
         if let Ok(()) = self
@@ -48,7 +38,9 @@ impl Explorer {
         }
         false
     }
-    pub fn run(&mut self) {
+}
+impl ExplorerTrait for Explorer {
+    fn run(&mut self) {
         self.auto_mode = false;
         loop {
             // Checks for a message from the orchestrator
@@ -159,15 +151,7 @@ impl Explorer {
                             }
                         }
                     }
-                    OrchestratorToExplorer::CombineResourceRequest { to_generate } => { /*
-                        if let Ok(()) =
-                        self.tx_planet
-                        .send(ExplorerToPlanet::CombineResourceRequest {
-                        explorer_id: self.id,
-                        msg: ComplexResourceRequest,
-                        })
-                        {}*/
-                    }
+                    OrchestratorToExplorer::CombineResourceRequest { to_generate } => {}
                     BagContentRequest => todo!(),
                     NeighborsResponse { neighbors } => todo!(),
                 }

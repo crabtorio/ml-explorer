@@ -45,6 +45,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "explorer-common"
+version = "0.1.0"
+source = "git+https://github.com/crabtorio/explorer-common?branch=main#2c3764c0c257127941466f2bf253e6f79d969814"
+dependencies = [
+ "common-game",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -68,6 +76,7 @@ version = "0.1.0"
 dependencies = [
  "common-game",
  "crossbeam-channel",
+ "explorer-common",
 ]
 
 [[package]]
