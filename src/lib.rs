@@ -58,6 +58,37 @@ impl Explorer {
         }
         false
     }
+    fn combine_and_respond(&mut self, complex_resource_request: ComplexResourceRequest) {
+        if let Ok(()) = self
+            .tx_planet
+            .send(ExplorerToPlanet::CombineResourceRequest {
+                explorer_id: self.id,
+                msg: complex_resource_request,
+            })
+        {
+            if let Ok(response) = self.rx_planet.recv() {
+                if let PlanetToExplorer::CombineResourceResponse { complex_response } = response {
+                    if let Ok(()) =
+                        self.tx_orchestrator
+                            .send(ExplorerToOrchestrator::CombineResourceResponse {
+                                explorer_id: self.id,
+                                generated: match complex_response {
+                                    Ok(complex_resource) => {
+                                        self.bag.add_resource(ComplexResources(complex_resource));
+                                        Ok(())
+                                    }
+                                    Err((err, res1, res2)) => {
+                                        self.bag.add_resource(res1);
+                                        self.bag.add_resource(res2);
+                                        Err(err)
+                                    }
+                                },
+                            })
+                    {}
+                }
+            }
+        }
+    }
 }
 impl ExplorerTrait for Explorer {
     fn run(&mut self) {
@@ -185,36 +216,18 @@ impl ExplorerTrait for Explorer {
                                         BasicResourceType::Carbon,
                                     )),
                                 ) {
-                                    if let Ok(()) = self.tx_planet.send(
-                                        ExplorerToPlanet::CombineResourceRequest {
+                                    self.combine_and_respond(ComplexResourceRequest::Diamond(
+                                        res1, res2,
+                                    ));
+                                } else {
+                                    if let Ok(()) = self.tx_orchestrator.send(
+                                        ExplorerToOrchestrator::CombineResourceResponse {
                                             explorer_id: self.id,
-                                            msg: ComplexResourceRequest::Diamond(res1, res2),
+                                            generated: Err(String::from(
+                                                "Explorer is missing the required resources",
+                                            )),
                                         },
-                                    ) {
-                                        if let Ok(response) = self.rx_planet.recv() {
-                                            if let PlanetToExplorer::CombineResourceResponse {
-                                                complex_response,
-                                            } = response
-                                            {
-                                                if let Ok(()) = self.tx_orchestrator.send(
-                                                    ExplorerToOrchestrator::CombineResourceResponse {
-                                                        explorer_id: self.id,
-                                                        generated: match complex_response{
-                                                            Ok(complex_resource) => {
-                                                                self.bag.add_resource(ComplexResources(complex_resource));
-                                                                Ok(())
-                                                            }
-                                                            Err((err, res1, res2)) => {
-                                                                self.bag.add_resource(res1);
-                                                                self.bag.add_resource(res2);
-                                                                Err(err)
-                                                            },
-                                                        },
-                                                    },
-                                                ) {}
-                                            }
-                                        }
-                                    }
+                                    ) {}
                                 }
                             }
                             ComplexResourceType::Water => {
@@ -229,36 +242,18 @@ impl ExplorerTrait for Explorer {
                                         BasicResourceType::Oxygen,
                                     )),
                                 ) {
-                                    if let Ok(()) = self.tx_planet.send(
-                                        ExplorerToPlanet::CombineResourceRequest {
+                                    self.combine_and_respond(ComplexResourceRequest::Water(
+                                        res1, res2,
+                                    ));
+                                } else {
+                                    if let Ok(()) = self.tx_orchestrator.send(
+                                        ExplorerToOrchestrator::CombineResourceResponse {
                                             explorer_id: self.id,
-                                            msg: ComplexResourceRequest::Water(res1, res2),
+                                            generated: Err(String::from(
+                                                "Explorer is missing the required resources",
+                                            )),
                                         },
-                                    ) {
-                                        if let Ok(response) = self.rx_planet.recv() {
-                                            if let PlanetToExplorer::CombineResourceResponse {
-                                                complex_response,
-                                            } = response
-                                            {
-                                                if let Ok(()) = self.tx_orchestrator.send(
-                                                ExplorerToOrchestrator::CombineResourceResponse {
-                                                    explorer_id: self.id,
-                                                    generated: match complex_response{
-                                                        Ok(complex_resource) => {
-                                                            self.bag.add_resource(ComplexResources(complex_resource));
-                                                            Ok(())
-                                                        }
-                                                        Err((err, res1, res2)) => {
-                                                            self.bag.add_resource(res1);
-                                                            self.bag.add_resource(res2);
-                                                            Err(err)
-                                                        },
-                                                    },
-                                                },
-                                            ) {}
-                                            }
-                                        }
-                                    }
+                                    ) {}
                                 }
                             }
                             ComplexResourceType::Life => {
@@ -273,36 +268,18 @@ impl ExplorerTrait for Explorer {
                                         BasicResourceType::Carbon,
                                     )),
                                 ) {
-                                    if let Ok(()) = self.tx_planet.send(
-                                        ExplorerToPlanet::CombineResourceRequest {
+                                    self.combine_and_respond(ComplexResourceRequest::Life(
+                                        res1, res2,
+                                    ));
+                                } else {
+                                    if let Ok(()) = self.tx_orchestrator.send(
+                                        ExplorerToOrchestrator::CombineResourceResponse {
                                             explorer_id: self.id,
-                                            msg: ComplexResourceRequest::Life(res1, res2),
+                                            generated: Err(String::from(
+                                                "Explorer is missing the required resources",
+                                            )),
                                         },
-                                    ) {
-                                        if let Ok(response) = self.rx_planet.recv() {
-                                            if let PlanetToExplorer::CombineResourceResponse {
-                                                complex_response,
-                                            } = response
-                                            {
-                                                if let Ok(()) = self.tx_orchestrator.send(
-                                                ExplorerToOrchestrator::CombineResourceResponse {
-                                                    explorer_id: self.id,
-                                                    generated: match complex_response{
-                                                        Ok(complex_resource) => {
-                                                            self.bag.add_resource(ComplexResources(complex_resource));
-                                                            Ok(())
-                                                        }
-                                                        Err((err, res1, res2)) => {
-                                                            self.bag.add_resource(res1);
-                                                            self.bag.add_resource(res2);
-                                                            Err(err)
-                                                        },
-                                                    },
-                                                },
-                                            ) {}
-                                            }
-                                        }
-                                    }
+                                    ) {}
                                 }
                             }
                             ComplexResourceType::Robot => {
@@ -317,36 +294,18 @@ impl ExplorerTrait for Explorer {
                                         ComplexResourceType::Life,
                                     )),
                                 ) {
-                                    if let Ok(()) = self.tx_planet.send(
-                                        ExplorerToPlanet::CombineResourceRequest {
+                                    self.combine_and_respond(ComplexResourceRequest::Robot(
+                                        res1, res2,
+                                    ));
+                                } else {
+                                    if let Ok(()) = self.tx_orchestrator.send(
+                                        ExplorerToOrchestrator::CombineResourceResponse {
                                             explorer_id: self.id,
-                                            msg: ComplexResourceRequest::Robot(res1, res2),
+                                            generated: Err(String::from(
+                                                "Explorer is missing the required resources",
+                                            )),
                                         },
-                                    ) {
-                                        if let Ok(response) = self.rx_planet.recv() {
-                                            if let PlanetToExplorer::CombineResourceResponse {
-                                                complex_response,
-                                            } = response
-                                            {
-                                                if let Ok(()) = self.tx_orchestrator.send(
-                                                ExplorerToOrchestrator::CombineResourceResponse {
-                                                    explorer_id: self.id,
-                                                    generated: match complex_response{
-                                                        Ok(complex_resource) => {
-                                                            self.bag.add_resource(ComplexResources(complex_resource));
-                                                            Ok(())
-                                                        }
-                                                        Err((err, res1, res2)) => {
-                                                            self.bag.add_resource(res1);
-                                                            self.bag.add_resource(res2);
-                                                            Err(err)
-                                                        },
-                                                    },
-                                                },
-                                            ) {}
-                                            }
-                                        }
-                                    }
+                                    ) {}
                                 }
                             }
                             ComplexResourceType::Dolphin => {
@@ -361,36 +320,18 @@ impl ExplorerTrait for Explorer {
                                         ComplexResourceType::Life,
                                     )),
                                 ) {
-                                    if let Ok(()) = self.tx_planet.send(
-                                        ExplorerToPlanet::CombineResourceRequest {
+                                    self.combine_and_respond(ComplexResourceRequest::Dolphin(
+                                        res1, res2,
+                                    ));
+                                } else {
+                                    if let Ok(()) = self.tx_orchestrator.send(
+                                        ExplorerToOrchestrator::CombineResourceResponse {
                                             explorer_id: self.id,
-                                            msg: ComplexResourceRequest::Dolphin(res1, res2),
+                                            generated: Err(String::from(
+                                                "Explorer is missing the required resources",
+                                            )),
                                         },
-                                    ) {
-                                        if let Ok(response) = self.rx_planet.recv() {
-                                            if let PlanetToExplorer::CombineResourceResponse {
-                                                complex_response,
-                                            } = response
-                                            {
-                                                if let Ok(()) = self.tx_orchestrator.send(
-                                                ExplorerToOrchestrator::CombineResourceResponse {
-                                                    explorer_id: self.id,
-                                                    generated: match complex_response{
-                                                        Ok(complex_resource) => {
-                                                            self.bag.add_resource(ComplexResources(complex_resource));
-                                                            Ok(())
-                                                        }
-                                                        Err((err, res1, res2)) => {
-                                                            self.bag.add_resource(res1);
-                                                            self.bag.add_resource(res2);
-                                                            Err(err)
-                                                        },
-                                                    },
-                                                },
-                                            ) {}
-                                            }
-                                        }
-                                    }
+                                    ) {}
                                 }
                             }
                             ComplexResourceType::AIPartner => {
@@ -405,36 +346,18 @@ impl ExplorerTrait for Explorer {
                                         ComplexResourceType::Diamond,
                                     )),
                                 ) {
-                                    if let Ok(()) = self.tx_planet.send(
-                                        ExplorerToPlanet::CombineResourceRequest {
+                                    self.combine_and_respond(ComplexResourceRequest::AIPartner(
+                                        res1, res2,
+                                    ));
+                                } else {
+                                    if let Ok(()) = self.tx_orchestrator.send(
+                                        ExplorerToOrchestrator::CombineResourceResponse {
                                             explorer_id: self.id,
-                                            msg: ComplexResourceRequest::AIPartner(res1, res2),
+                                            generated: Err(String::from(
+                                                "Explorer is missing the required resources",
+                                            )),
                                         },
-                                    ) {
-                                        if let Ok(response) = self.rx_planet.recv() {
-                                            if let PlanetToExplorer::CombineResourceResponse {
-                                                complex_response,
-                                            } = response
-                                            {
-                                                if let Ok(()) = self.tx_orchestrator.send(
-                                                ExplorerToOrchestrator::CombineResourceResponse {
-                                                    explorer_id: self.id,
-                                                    generated: match complex_response{
-                                                        Ok(complex_resource) => {
-                                                            self.bag.add_resource(ComplexResources(complex_resource));
-                                                            Ok(())
-                                                        }
-                                                        Err((err, res1, res2)) => {
-                                                            self.bag.add_resource(res1);
-                                                            self.bag.add_resource(res2);
-                                                            Err(err)
-                                                        },
-                                                    },
-                                                },
-                                            ) {}
-                                            }
-                                        }
-                                    }
+                                    ) {}
                                 }
                             }
                         }
