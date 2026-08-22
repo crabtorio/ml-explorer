@@ -1,12 +1,5 @@
 use common_game::{
-    components::resource::{
-        BasicResource::*, BasicResourceType, ComplexResource::*, ComplexResourceRequest,
-        ComplexResourceType, GenericResource::*, ResourceType,
-    },
-    protocols::{
-        orchestrator_explorer::{ExplorerToOrchestrator::*, OrchestratorToExplorer::*, *},
-        planet_explorer::{PlanetToExplorer::*, *},
-    },
+    protocols::{orchestrator_explorer::*, planet_explorer::*},
     utils::ID,
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -43,352 +36,88 @@ impl Explorer {
             tx_orchestrator,
         }
     }
-    pub fn is_combination_available(&self, resource: ComplexResourceType) -> bool {
-        if let Ok(()) = self
-            .tx_planet
-            .send(ExplorerToPlanet::SupportedCombinationRequest {
-                explorer_id: self.id,
-            })
-        {
-            if let Ok(msg) = self.rx_planet.recv() {
-                if let SupportedCombinationResponse { combination_list } = msg {
-                    return combination_list.contains(&resource);
-                }
-            }
-        }
-        false
-    }
-    fn combine_and_respond(&mut self, complex_resource_request: ComplexResourceRequest) {
-        if let Ok(()) = self
-            .tx_planet
-            .send(ExplorerToPlanet::CombineResourceRequest {
-                explorer_id: self.id,
-                msg: complex_resource_request,
-            })
-        {
-            if let Ok(response) = self.rx_planet.recv() {
-                if let PlanetToExplorer::CombineResourceResponse { complex_response } = response {
-                    if let Ok(()) =
-                        self.tx_orchestrator
-                            .send(ExplorerToOrchestrator::CombineResourceResponse {
-                                explorer_id: self.id,
-                                generated: match complex_response {
-                                    Ok(complex_resource) => {
-                                        self.bag.add_resource(ComplexResources(complex_resource));
-                                        Ok(())
-                                    }
-                                    Err((err, res1, res2)) => {
-                                        self.bag.add_resource(res1);
-                                        self.bag.add_resource(res2);
-                                        Err(err)
-                                    }
-                                },
-                            })
-                    {}
-                }
-            }
-        }
-    }
 }
 impl ExplorerTrait for Explorer {
     fn run(&mut self) {
         self.auto_mode = false;
         loop {
-            // Checks for a message from the orchestrator
-            if let Ok(message) = self.rx_orchestrator.try_recv() {
-                match message {
-                    StartExplorerAI => {
-                        self.auto_mode = true;
-                    }
-                    ResetExplorerAI => self.auto_mode = true,
-                    KillExplorer => break,
-                    StopExplorerAI => self.auto_mode = false,
-                    MoveToPlanet {
-                        sender_to_new_planet,
-                        planet_id,
-                    } => {
-                        self.planet_id = planet_id;
-                        if let Some(new_sender) = sender_to_new_planet {
-                            self.tx_planet = new_sender;
-                            match self.tx_orchestrator.send(MovedToPlanetResult {
-                                explorer_id: self.id,
-                                planet_id,
-                            }) {
-                                _ => (), // Logging
-                            }
-                        }
-                    }
-                    CurrentPlanetRequest => {
-                        if let Ok(()) = self.tx_orchestrator.send(CurrentPlanetResult {
-                            explorer_id: self.id,
-                            planet_id: self.planet_id,
-                        }) {
-                            // Logging
-                        }
-                    }
-                    SupportedResourceRequest => {
-                        if let Ok(()) =
-                            self.tx_planet
-                                .send(ExplorerToPlanet::SupportedResourceRequest {
-                                    explorer_id: self.id,
-                                })
-                        {
-                            if let Ok(msg) = self.rx_planet.recv() {
-                                if let SupportedResourceResponse { resource_list } = msg {
-                                    if let Ok(()) =
-                                        self.tx_orchestrator.send(SupportedResourceResult {
-                                            explorer_id: self.id,
-                                            supported_resources: resource_list,
-                                        })
-                                    {
-                                        // Logging
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    SupportedCombinationRequest => {
-                        if let Ok(()) =
-                            self.tx_planet
-                                .send(ExplorerToPlanet::SupportedCombinationRequest {
-                                    explorer_id: self.id,
-                                })
-                        {
-                            if let Ok(msg) = self.rx_planet.recv() {
-                                if let SupportedCombinationResponse { combination_list } = msg {
-                                    if let Ok(()) =
-                                        self.tx_orchestrator.send(SupportedCombinationResult {
-                                            explorer_id: self.id,
-                                            combination_list,
-                                        })
-                                    {
-                                        // Logging
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    OrchestratorToExplorer::GenerateResourceRequest { to_generate } => {
-                        if let Ok(()) =
-                            self.tx_planet
-                                .send(ExplorerToPlanet::GenerateResourceRequest {
-                                    explorer_id: self.id,
-                                    resource: to_generate,
-                                })
-                        {
-                            if let Ok(msg) = self.rx_planet.recv() {
-                                if let PlanetToExplorer::GenerateResourceResponse { resource } = msg
-                                {
-                                    if let Some(resource) = resource {
-                                        if let Ok(()) = self.tx_orchestrator.send(
-                                            ExplorerToOrchestrator::GenerateResourceResponse {
-                                                explorer_id: self.id,
-                                                generated: Ok(()),
-                                            },
-                                        ) {
-                                            self.bag.resources.push(BasicResources(resource));
-                                        }
-                                    } else {
-                                        if let Ok(()) = self.tx_orchestrator.send(
-                                            ExplorerToOrchestrator::GenerateResourceResponse {
-                                                explorer_id: self.id,
-                                                generated: Err(String::from(
-                                                    "No resource was created",
-                                                )),
-                                            },
-                                        ) {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    OrchestratorToExplorer::CombineResourceRequest { to_generate } => {
-                        match to_generate {
-                            ComplexResourceType::Diamond => {
-                                if let (
-                                    Ok(BasicResources(Carbon(res1))),
-                                    Ok(BasicResources(Carbon(res2))),
-                                ) = (
-                                    self.bag.take_resource(ResourceType::Basic(
-                                        BasicResourceType::Carbon,
-                                    )),
-                                    self.bag.take_resource(ResourceType::Basic(
-                                        BasicResourceType::Carbon,
-                                    )),
-                                ) {
-                                    self.combine_and_respond(ComplexResourceRequest::Diamond(
-                                        res1, res2,
-                                    ));
-                                } else {
-                                    if let Ok(()) = self.tx_orchestrator.send(
-                                        ExplorerToOrchestrator::CombineResourceResponse {
-                                            explorer_id: self.id,
-                                            generated: Err(String::from(
-                                                "Explorer is missing the required resources",
-                                            )),
-                                        },
-                                    ) {}
-                                }
-                            }
-                            ComplexResourceType::Water => {
-                                if let (
-                                    Ok(BasicResources(Hydrogen(res1))),
-                                    Ok(BasicResources(Oxygen(res2))),
-                                ) = (
-                                    self.bag.take_resource(ResourceType::Basic(
-                                        BasicResourceType::Hydrogen,
-                                    )),
-                                    self.bag.take_resource(ResourceType::Basic(
-                                        BasicResourceType::Oxygen,
-                                    )),
-                                ) {
-                                    self.combine_and_respond(ComplexResourceRequest::Water(
-                                        res1, res2,
-                                    ));
-                                } else {
-                                    if let Ok(()) = self.tx_orchestrator.send(
-                                        ExplorerToOrchestrator::CombineResourceResponse {
-                                            explorer_id: self.id,
-                                            generated: Err(String::from(
-                                                "Explorer is missing the required resources",
-                                            )),
-                                        },
-                                    ) {}
-                                }
-                            }
-                            ComplexResourceType::Life => {
-                                if let (
-                                    Ok(ComplexResources(Water(res1))),
-                                    Ok(BasicResources(Carbon(res2))),
-                                ) = (
-                                    self.bag.take_resource(ResourceType::Complex(
-                                        ComplexResourceType::Water,
-                                    )),
-                                    self.bag.take_resource(ResourceType::Basic(
-                                        BasicResourceType::Carbon,
-                                    )),
-                                ) {
-                                    self.combine_and_respond(ComplexResourceRequest::Life(
-                                        res1, res2,
-                                    ));
-                                } else {
-                                    if let Ok(()) = self.tx_orchestrator.send(
-                                        ExplorerToOrchestrator::CombineResourceResponse {
-                                            explorer_id: self.id,
-                                            generated: Err(String::from(
-                                                "Explorer is missing the required resources",
-                                            )),
-                                        },
-                                    ) {}
-                                }
-                            }
-                            ComplexResourceType::Robot => {
-                                if let (
-                                    Ok(BasicResources(Silicon(res1))),
-                                    Ok(ComplexResources(Life(res2))),
-                                ) = (
-                                    self.bag.take_resource(ResourceType::Basic(
-                                        BasicResourceType::Silicon,
-                                    )),
-                                    self.bag.take_resource(ResourceType::Complex(
-                                        ComplexResourceType::Life,
-                                    )),
-                                ) {
-                                    self.combine_and_respond(ComplexResourceRequest::Robot(
-                                        res1, res2,
-                                    ));
-                                } else {
-                                    if let Ok(()) = self.tx_orchestrator.send(
-                                        ExplorerToOrchestrator::CombineResourceResponse {
-                                            explorer_id: self.id,
-                                            generated: Err(String::from(
-                                                "Explorer is missing the required resources",
-                                            )),
-                                        },
-                                    ) {}
-                                }
-                            }
-                            ComplexResourceType::Dolphin => {
-                                if let (
-                                    Ok(ComplexResources(Water(res1))),
-                                    Ok(ComplexResources(Life(res2))),
-                                ) = (
-                                    self.bag.take_resource(ResourceType::Complex(
-                                        ComplexResourceType::Water,
-                                    )),
-                                    self.bag.take_resource(ResourceType::Complex(
-                                        ComplexResourceType::Life,
-                                    )),
-                                ) {
-                                    self.combine_and_respond(ComplexResourceRequest::Dolphin(
-                                        res1, res2,
-                                    ));
-                                } else {
-                                    if let Ok(()) = self.tx_orchestrator.send(
-                                        ExplorerToOrchestrator::CombineResourceResponse {
-                                            explorer_id: self.id,
-                                            generated: Err(String::from(
-                                                "Explorer is missing the required resources",
-                                            )),
-                                        },
-                                    ) {}
-                                }
-                            }
-                            ComplexResourceType::AIPartner => {
-                                if let (
-                                    Ok(ComplexResources(Robot(res1))),
-                                    Ok(ComplexResources(Diamond(res2))),
-                                ) = (
-                                    self.bag.take_resource(ResourceType::Complex(
-                                        ComplexResourceType::Robot,
-                                    )),
-                                    self.bag.take_resource(ResourceType::Complex(
-                                        ComplexResourceType::Diamond,
-                                    )),
-                                ) {
-                                    self.combine_and_respond(ComplexResourceRequest::AIPartner(
-                                        res1, res2,
-                                    ));
-                                } else {
-                                    if let Ok(()) = self.tx_orchestrator.send(
-                                        ExplorerToOrchestrator::CombineResourceResponse {
-                                            explorer_id: self.id,
-                                            generated: Err(String::from(
-                                                "Explorer is missing the required resources",
-                                            )),
-                                        },
-                                    ) {}
-                                }
-                            }
-                        }
-                    }
-                    BagContentRequest => {
-                        if let Ok(()) = self.tx_orchestrator.send(BagContentResponse {
-                            explorer_id: self.id,
-                            bag_content: BagContent::from(&self.bag),
-                        }) {}
-                    }
-                    NeighborsResponse { neighbors } => {
-                        // Never going to happen here as when it happens is in response
-                        // to the explorer request, after which the explorer will block
-                        // and wait for this response
-                    }
-                }
-            }
+            self.try_recv_from_orchestrator_and_respond();
         }
+    }
+
+    fn get_id(&self) -> ID {
+        self.id
+    }
+
+    fn get_bag(&mut self) -> &mut Bag {
+        &mut self.bag
+    }
+
+    fn get_planet_id(&self) -> ID {
+        self.planet_id
+    }
+
+    fn set_planet_id(&mut self, new: ID) {
+        self.planet_id = new;
+    }
+
+    fn get_auto_mode(&self) -> bool {
+        self.auto_mode
+    }
+
+    fn set_auto_mode(&mut self, mode: bool) {
+        self.auto_mode = mode;
+    }
+
+    fn get_rx_planet(&self) -> Receiver<PlanetToExplorer> {
+        self.rx_planet.clone()
+    }
+
+    fn set_rx_planet(&mut self, new: Receiver<PlanetToExplorer>) {
+        self.rx_planet = new;
+    }
+
+    fn get_tx_planet(&self) -> Sender<ExplorerToPlanet> {
+        self.tx_planet.clone()
+    }
+
+    fn set_tx_planet(&mut self, new: Sender<ExplorerToPlanet>) {
+        self.tx_planet = new;
+    }
+
+    fn get_rx_orchestrator(&self) -> Receiver<OrchestratorToExplorer> {
+        self.rx_orchestrator.clone()
+    }
+
+    fn set_rx_orchestrator(&mut self, new: Receiver<OrchestratorToExplorer>) {
+        self.rx_orchestrator = new;
+    }
+
+    fn get_tx_orchestrator(&self) -> Sender<ExplorerToOrchestrator<BagContent>> {
+        self.tx_orchestrator.clone()
+    }
+
+    fn set_tx_orchestrator(&mut self, new: Sender<ExplorerToOrchestrator<BagContent>>) {
+        self.tx_orchestrator = new;
     }
 }
 
+// The tested functions were moved to explorer_common
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, thread};
+
+    use common_game::{
+        components::resource::ComplexResourceType,
+        protocols::planet_explorer::PlanetToExplorer::SupportedCombinationResponse,
+    };
 
     use super::*;
 
     struct TestEnvironment {
         // Channel ends of the orchestrator to/from the explorer
         tx_orchestrator: Sender<OrchestratorToExplorer>,
-        rx_orchestrator: Receiver<ExplorerToOrchestrator<Bag>>,
+        rx_orchestrator: Receiver<ExplorerToOrchestrator<BagContent>>,
         // Channel ends of the planet to/from the explorer
         tx_planet: Sender<PlanetToExplorer>,
         rx_planet: Receiver<ExplorerToPlanet>,
