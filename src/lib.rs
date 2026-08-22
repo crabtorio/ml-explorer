@@ -1,5 +1,8 @@
 use common_game::{
-    components::resource::{ComplexResourceType, GenericResource::BasicResources},
+    components::resource::{
+        BasicResource::*, BasicResourceType, ComplexResource::*, ComplexResourceRequest,
+        ComplexResourceType, GenericResource::*, ResourceType,
+    },
     protocols::{
         orchestrator_explorer::{ExplorerToOrchestrator::*, OrchestratorToExplorer::*, *},
         planet_explorer::{PlanetToExplorer::*, *},
@@ -168,7 +171,274 @@ impl ExplorerTrait for Explorer {
                             }
                         }
                     }
-                    OrchestratorToExplorer::CombineResourceRequest { to_generate } => {}
+                    OrchestratorToExplorer::CombineResourceRequest { to_generate } => {
+                        match to_generate {
+                            ComplexResourceType::Diamond => {
+                                if let (
+                                    Ok(BasicResources(Carbon(res1))),
+                                    Ok(BasicResources(Carbon(res2))),
+                                ) = (
+                                    self.bag.take_resource(ResourceType::Basic(
+                                        BasicResourceType::Carbon,
+                                    )),
+                                    self.bag.take_resource(ResourceType::Basic(
+                                        BasicResourceType::Carbon,
+                                    )),
+                                ) {
+                                    if let Ok(()) = self.tx_planet.send(
+                                        ExplorerToPlanet::CombineResourceRequest {
+                                            explorer_id: self.id,
+                                            msg: ComplexResourceRequest::Diamond(res1, res2),
+                                        },
+                                    ) {
+                                        if let Ok(response) = self.rx_planet.recv() {
+                                            if let PlanetToExplorer::CombineResourceResponse {
+                                                complex_response,
+                                            } = response
+                                            {
+                                                if let Ok(()) = self.tx_orchestrator.send(
+                                                    ExplorerToOrchestrator::CombineResourceResponse {
+                                                        explorer_id: self.id,
+                                                        generated: match complex_response{
+                                                            Ok(complex_resource) => {
+                                                                self.bag.add_resource(ComplexResources(complex_resource));
+                                                                Ok(())
+                                                            }
+                                                            Err((err, res1, res2)) => {
+                                                                self.bag.add_resource(res1);
+                                                                self.bag.add_resource(res2);
+                                                                Err(err)
+                                                            },
+                                                        },
+                                                    },
+                                                ) {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ComplexResourceType::Water => {
+                                if let (
+                                    Ok(BasicResources(Hydrogen(res1))),
+                                    Ok(BasicResources(Oxygen(res2))),
+                                ) = (
+                                    self.bag.take_resource(ResourceType::Basic(
+                                        BasicResourceType::Hydrogen,
+                                    )),
+                                    self.bag.take_resource(ResourceType::Basic(
+                                        BasicResourceType::Oxygen,
+                                    )),
+                                ) {
+                                    if let Ok(()) = self.tx_planet.send(
+                                        ExplorerToPlanet::CombineResourceRequest {
+                                            explorer_id: self.id,
+                                            msg: ComplexResourceRequest::Water(res1, res2),
+                                        },
+                                    ) {
+                                        if let Ok(response) = self.rx_planet.recv() {
+                                            if let PlanetToExplorer::CombineResourceResponse {
+                                                complex_response,
+                                            } = response
+                                            {
+                                                if let Ok(()) = self.tx_orchestrator.send(
+                                                ExplorerToOrchestrator::CombineResourceResponse {
+                                                    explorer_id: self.id,
+                                                    generated: match complex_response{
+                                                        Ok(complex_resource) => {
+                                                            self.bag.add_resource(ComplexResources(complex_resource));
+                                                            Ok(())
+                                                        }
+                                                        Err((err, res1, res2)) => {
+                                                            self.bag.add_resource(res1);
+                                                            self.bag.add_resource(res2);
+                                                            Err(err)
+                                                        },
+                                                    },
+                                                },
+                                            ) {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ComplexResourceType::Life => {
+                                if let (
+                                    Ok(ComplexResources(Water(res1))),
+                                    Ok(BasicResources(Carbon(res2))),
+                                ) = (
+                                    self.bag.take_resource(ResourceType::Complex(
+                                        ComplexResourceType::Water,
+                                    )),
+                                    self.bag.take_resource(ResourceType::Basic(
+                                        BasicResourceType::Carbon,
+                                    )),
+                                ) {
+                                    if let Ok(()) = self.tx_planet.send(
+                                        ExplorerToPlanet::CombineResourceRequest {
+                                            explorer_id: self.id,
+                                            msg: ComplexResourceRequest::Life(res1, res2),
+                                        },
+                                    ) {
+                                        if let Ok(response) = self.rx_planet.recv() {
+                                            if let PlanetToExplorer::CombineResourceResponse {
+                                                complex_response,
+                                            } = response
+                                            {
+                                                if let Ok(()) = self.tx_orchestrator.send(
+                                                ExplorerToOrchestrator::CombineResourceResponse {
+                                                    explorer_id: self.id,
+                                                    generated: match complex_response{
+                                                        Ok(complex_resource) => {
+                                                            self.bag.add_resource(ComplexResources(complex_resource));
+                                                            Ok(())
+                                                        }
+                                                        Err((err, res1, res2)) => {
+                                                            self.bag.add_resource(res1);
+                                                            self.bag.add_resource(res2);
+                                                            Err(err)
+                                                        },
+                                                    },
+                                                },
+                                            ) {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ComplexResourceType::Robot => {
+                                if let (
+                                    Ok(BasicResources(Silicon(res1))),
+                                    Ok(ComplexResources(Life(res2))),
+                                ) = (
+                                    self.bag.take_resource(ResourceType::Basic(
+                                        BasicResourceType::Silicon,
+                                    )),
+                                    self.bag.take_resource(ResourceType::Complex(
+                                        ComplexResourceType::Life,
+                                    )),
+                                ) {
+                                    if let Ok(()) = self.tx_planet.send(
+                                        ExplorerToPlanet::CombineResourceRequest {
+                                            explorer_id: self.id,
+                                            msg: ComplexResourceRequest::Robot(res1, res2),
+                                        },
+                                    ) {
+                                        if let Ok(response) = self.rx_planet.recv() {
+                                            if let PlanetToExplorer::CombineResourceResponse {
+                                                complex_response,
+                                            } = response
+                                            {
+                                                if let Ok(()) = self.tx_orchestrator.send(
+                                                ExplorerToOrchestrator::CombineResourceResponse {
+                                                    explorer_id: self.id,
+                                                    generated: match complex_response{
+                                                        Ok(complex_resource) => {
+                                                            self.bag.add_resource(ComplexResources(complex_resource));
+                                                            Ok(())
+                                                        }
+                                                        Err((err, res1, res2)) => {
+                                                            self.bag.add_resource(res1);
+                                                            self.bag.add_resource(res2);
+                                                            Err(err)
+                                                        },
+                                                    },
+                                                },
+                                            ) {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ComplexResourceType::Dolphin => {
+                                if let (
+                                    Ok(ComplexResources(Water(res1))),
+                                    Ok(ComplexResources(Life(res2))),
+                                ) = (
+                                    self.bag.take_resource(ResourceType::Complex(
+                                        ComplexResourceType::Water,
+                                    )),
+                                    self.bag.take_resource(ResourceType::Complex(
+                                        ComplexResourceType::Life,
+                                    )),
+                                ) {
+                                    if let Ok(()) = self.tx_planet.send(
+                                        ExplorerToPlanet::CombineResourceRequest {
+                                            explorer_id: self.id,
+                                            msg: ComplexResourceRequest::Dolphin(res1, res2),
+                                        },
+                                    ) {
+                                        if let Ok(response) = self.rx_planet.recv() {
+                                            if let PlanetToExplorer::CombineResourceResponse {
+                                                complex_response,
+                                            } = response
+                                            {
+                                                if let Ok(()) = self.tx_orchestrator.send(
+                                                ExplorerToOrchestrator::CombineResourceResponse {
+                                                    explorer_id: self.id,
+                                                    generated: match complex_response{
+                                                        Ok(complex_resource) => {
+                                                            self.bag.add_resource(ComplexResources(complex_resource));
+                                                            Ok(())
+                                                        }
+                                                        Err((err, res1, res2)) => {
+                                                            self.bag.add_resource(res1);
+                                                            self.bag.add_resource(res2);
+                                                            Err(err)
+                                                        },
+                                                    },
+                                                },
+                                            ) {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ComplexResourceType::AIPartner => {
+                                if let (
+                                    Ok(ComplexResources(Robot(res1))),
+                                    Ok(ComplexResources(Diamond(res2))),
+                                ) = (
+                                    self.bag.take_resource(ResourceType::Complex(
+                                        ComplexResourceType::Robot,
+                                    )),
+                                    self.bag.take_resource(ResourceType::Complex(
+                                        ComplexResourceType::Diamond,
+                                    )),
+                                ) {
+                                    if let Ok(()) = self.tx_planet.send(
+                                        ExplorerToPlanet::CombineResourceRequest {
+                                            explorer_id: self.id,
+                                            msg: ComplexResourceRequest::AIPartner(res1, res2),
+                                        },
+                                    ) {
+                                        if let Ok(response) = self.rx_planet.recv() {
+                                            if let PlanetToExplorer::CombineResourceResponse {
+                                                complex_response,
+                                            } = response
+                                            {
+                                                if let Ok(()) = self.tx_orchestrator.send(
+                                                ExplorerToOrchestrator::CombineResourceResponse {
+                                                    explorer_id: self.id,
+                                                    generated: match complex_response{
+                                                        Ok(complex_resource) => {
+                                                            self.bag.add_resource(ComplexResources(complex_resource));
+                                                            Ok(())
+                                                        }
+                                                        Err((err, res1, res2)) => {
+                                                            self.bag.add_resource(res1);
+                                                            self.bag.add_resource(res2);
+                                                            Err(err)
+                                                        },
+                                                    },
+                                                },
+                                            ) {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     BagContentRequest => todo!(),
                     NeighborsResponse { neighbors } => todo!(),
                 }
