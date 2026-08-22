@@ -10,8 +10,8 @@ use common_game::{
     utils::ID,
 };
 use crossbeam_channel::{Receiver, Sender};
-use explorer_common::Bag;
 use explorer_common::Explorer as ExplorerTrait;
+use explorer_common::{Bag, BagContent};
 pub struct Explorer {
     id: ID,
     bag: Bag,
@@ -20,7 +20,7 @@ pub struct Explorer {
     rx_planet: Receiver<PlanetToExplorer>,
     tx_planet: Sender<ExplorerToPlanet>,
     rx_orchestrator: Receiver<OrchestratorToExplorer>,
-    tx_orchestrator: Sender<ExplorerToOrchestrator<Bag>>,
+    tx_orchestrator: Sender<ExplorerToOrchestrator<BagContent>>,
 }
 impl Explorer {
     pub fn new(
@@ -30,7 +30,7 @@ impl Explorer {
         rx_planet: Receiver<PlanetToExplorer>,
         tx_planet: Sender<ExplorerToPlanet>,
         rx_orchestrator: Receiver<OrchestratorToExplorer>,
-        tx_orchestrator: Sender<ExplorerToOrchestrator<Bag>>,
+        tx_orchestrator: Sender<ExplorerToOrchestrator<BagContent>>,
     ) -> Self {
         Self {
             id,
@@ -362,8 +362,17 @@ impl ExplorerTrait for Explorer {
                             }
                         }
                     }
-                    BagContentRequest => todo!(),
-                    NeighborsResponse { neighbors } => todo!(),
+                    BagContentRequest => {
+                        if let Ok(()) = self.tx_orchestrator.send(BagContentResponse {
+                            explorer_id: self.id,
+                            bag_content: BagContent::from(&self.bag),
+                        }) {}
+                    }
+                    NeighborsResponse { neighbors } => {
+                        // Never going to happen here as when it happens is in response
+                        // to the explorer request, after which the explorer will block
+                        // and wait for this response
+                    }
                 }
             }
         }
