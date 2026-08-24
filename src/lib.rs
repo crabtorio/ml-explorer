@@ -38,8 +38,17 @@ impl Explorer {
     }
 }
 impl ExplorerTrait for Explorer {
-    fn run(&mut self) {
+    fn run(
+        &mut self,
+        rx_planet: Receiver<PlanetToExplorer>,
+        rx_orchestrator: Receiver<OrchestratorToExplorer>,
+        tx_orchestrator: Sender<ExplorerToOrchestrator<BagContent>>,
+    ) {
         self.auto_mode = false;
+        self.rx_planet = rx_planet;
+        self.rx_orchestrator = rx_orchestrator;
+        self.tx_orchestrator = tx_orchestrator;
+
         loop {
             self.try_recv_from_orchestrator_and_respond();
         }
