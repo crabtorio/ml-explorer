@@ -1,56 +1,111 @@
+use std::collections::{HashMap, HashSet};
+
 use common_game::{
-    protocols::{orchestrator_explorer::*, planet_explorer::*},
+    components::{
+        planet::Planet,
+        resource::{AIPartner, BasicResourceType, ComplexResourceType},
+    },
+    protocols::{
+        orchestrator_explorer::*,
+        planet_explorer::{ExplorerToPlanet, PlanetToExplorer},
+    },
     utils::ID,
 };
 use crossbeam_channel::{Receiver, Sender};
-use explorer_common::Explorer as ExplorerTrait;
 use explorer_common::{Bag, BagContent};
+use explorer_common::{Explorer as ExplorerTrait, logged_channel::LoggedChannel};
 pub struct Explorer {
     id: ID,
     bag: Bag,
     planet_id: ID,
     auto_mode: bool,
-    rx_planet: Receiver<PlanetToExplorer>,
-    tx_planet: Sender<ExplorerToPlanet>,
-    rx_orchestrator: Receiver<OrchestratorToExplorer>,
-    tx_orchestrator: Sender<ExplorerToOrchestrator<BagContent>>,
+    planet_channel: LoggedChannel<ExplorerToPlanet, PlanetToExplorer>,
+    orchestrator_channel: LoggedChannel<ExplorerToOrchestrator<BagContent>, OrchestratorToExplorer>,
+    visited_stack: Vec<PlanetInfo>,
 }
-impl Explorer {
-    pub fn new(
+struct PlanetInfo {
+    id: ID,
+    supported_resources: HashSet<BasicResourceType>,
+    supported_combinations: HashSet<ComplexResourceType>,
+}
+impl PlanetInfo {
+    fn new(
         id: ID,
-        bag: Bag,
-        planet_id: ID,
-        rx_planet: Receiver<PlanetToExplorer>,
-        tx_planet: Sender<ExplorerToPlanet>,
-        rx_orchestrator: Receiver<OrchestratorToExplorer>,
-        tx_orchestrator: Sender<ExplorerToOrchestrator<BagContent>>,
+        supported_resources: HashSet<BasicResourceType>,
+        supported_combinations: HashSet<ComplexResourceType>,
     ) -> Self {
         Self {
             id,
-            bag: bag,
-            planet_id,
-            auto_mode: false,
-            rx_planet,
-            tx_planet,
-            rx_orchestrator,
-            tx_orchestrator,
+            supported_resources,
+            supported_combinations,
         }
     }
+} /*
+impl Explorer {
+fn find_ai_partner(&mut self) -> Result<AIPartner, ()> {
+if !self.visited_stack.into {
+// Gets supported resources and combinations from the planet it is in
+if let Ok(()) = self
+.planet_channel
+.send(ExplorerToPlanet::SupportedResourceRequest {
+explorer_id: self.id,
+})
+{
+if let Ok(PlanetToExplorer::SupportedResourceResponse { resource_list }) =
+self.planet_channel.recv()
+{
+if let Ok(()) =
+self.planet_channel
+.send(ExplorerToPlanet::SupportedCombinationRequest {
+explorer_id: self.id,
+})
+{
+if let Ok(PlanetToExplorer::SupportedCombinationResponse {
+combination_list,
+}) = self.planet_channel.recv()
+{
+self.visited.insert(
+self.planet_id,
+PlanetInfo::new(resource_list, combination_list),
+);
 }
-impl ExplorerTrait for Explorer {
-    fn run(
-        &mut self,
-        rx_planet: Receiver<PlanetToExplorer>,
-        rx_orchestrator: Receiver<OrchestratorToExplorer>,
-        tx_orchestrator: Sender<ExplorerToOrchestrator<BagContent>>,
-    ) {
-        self.auto_mode = false;
-        self.rx_planet = rx_planet;
-        self.rx_orchestrator = rx_orchestrator;
-        self.tx_orchestrator = tx_orchestrator;
+}
+}
+}
+}
+//Gets neighbours from orchestrator
+if let Ok(()) = self
+.orchestrator_channel
+.send(ExplorerToOrchestrator::NeighborsRequest {
+explorer_id: self.id,
+current_planet_id: self.planet_id,
+})
+{
+if let Ok(OrchestratorToExplorer::NeighborsResponse { neighbors }) =
+self.orchestrator_channel.recv()
+{
+if neighbors
+.iter()
+.find(|id| !self.visited.contains_key(id))
+.unwra
+{}
+}
+}
 
+Err(())
+}
+}*/
+impl ExplorerTrait for Explorer {
+    fn run(&mut self) {
         loop {
             self.try_recv_from_orchestrator_and_respond();
+
+            /*if self.auto_mode {
+                match self.find_ai_partner() {
+                    Ok(ai_partner) => (),
+                    Err(()) => (),
+                }
+            }*/
         }
     }
 
@@ -78,36 +133,47 @@ impl ExplorerTrait for Explorer {
         self.auto_mode = mode;
     }
 
-    fn get_rx_planet(&self) -> Receiver<PlanetToExplorer> {
-        self.rx_planet.clone()
+    fn new(
+        id: ID,
+        bag: Bag,
+        planet_id: ID,
+        planet_channel: LoggedChannel<ExplorerToPlanet, PlanetToExplorer>,
+        orchestrator_channel: LoggedChannel<
+            ExplorerToOrchestrator<BagContent>,
+            OrchestratorToExplorer,
+        >,
+    ) -> Self {
+        Self {
+            id,
+            bag,
+            planet_id,
+            auto_mode: false,
+            planet_channel,
+            orchestrator_channel,
+            visited_stack: Vec::new(),
+        }
     }
 
-    fn set_rx_planet(&mut self, new: Receiver<PlanetToExplorer>) {
-        self.rx_planet = new;
+    fn get_planet_channel(&self) -> LoggedChannel<ExplorerToPlanet, PlanetToExplorer> {
+        self.planet_channel.clone()
+    }
+    fn set_planet_channel_tx(&mut self, tx: Sender<ExplorerToPlanet>) {
+        self.planet_channel.set_sender(tx);
+    }
+    fn set_planet_channel_rx(&mut self, rx: Receiver<PlanetToExplorer>) {
+        self.planet_channel.set_receiver(rx);
     }
 
-    fn get_tx_planet(&self) -> Sender<ExplorerToPlanet> {
-        self.tx_planet.clone()
+    fn get_orchestrator_channel(
+        &self,
+    ) -> LoggedChannel<ExplorerToOrchestrator<BagContent>, OrchestratorToExplorer> {
+        self.orchestrator_channel.clone()
     }
-
-    fn set_tx_planet(&mut self, new: Sender<ExplorerToPlanet>) {
-        self.tx_planet = new;
+    fn set_orchestrator_channel_tx(&mut self, tx: Sender<ExplorerToOrchestrator<BagContent>>) {
+        self.orchestrator_channel.set_sender(tx);
     }
-
-    fn get_rx_orchestrator(&self) -> Receiver<OrchestratorToExplorer> {
-        self.rx_orchestrator.clone()
-    }
-
-    fn set_rx_orchestrator(&mut self, new: Receiver<OrchestratorToExplorer>) {
-        self.rx_orchestrator = new;
-    }
-
-    fn get_tx_orchestrator(&self) -> Sender<ExplorerToOrchestrator<BagContent>> {
-        self.tx_orchestrator.clone()
-    }
-
-    fn set_tx_orchestrator(&mut self, new: Sender<ExplorerToOrchestrator<BagContent>>) {
-        self.tx_orchestrator = new;
+    fn set_orchestrator_channel_rx(&mut self, rx: Receiver<OrchestratorToExplorer>) {
+        self.orchestrator_channel.set_receiver(rx);
     }
 }
 
@@ -148,10 +214,17 @@ mod tests {
                 bag: Bag::new(),
                 planet_id: 0,
                 auto_mode: true,
-                rx_planet: rx_planet_explorer,
-                tx_planet: tx_explorer_planet,
-                rx_orchestrator: rx_orchestrator_explorer,
-                tx_orchestrator: tx_explorer_orchestrator,
+                planet_channel: LoggedChannel::new(
+                    rx_planet_explorer,
+                    tx_explorer_planet,
+                    "explorer".into(),
+                ),
+                orchestrator_channel: LoggedChannel::new(
+                    rx_orchestrator_explorer,
+                    tx_explorer_orchestrator,
+                    "explorer".into(),
+                ),
+                visited_stack: Vec::new(),
             };
 
             Self {
