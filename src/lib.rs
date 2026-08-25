@@ -1,10 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use common_game::{
-    components::{
-        planet::Planet,
-        resource::{AIPartner, BasicResourceType, ComplexResourceType},
-    },
+    components::resource::{AIPartner, BasicResourceType, ComplexResourceType},
     protocols::{
         orchestrator_explorer::*,
         planet_explorer::{ExplorerToPlanet, PlanetToExplorer},
@@ -40,72 +37,92 @@ impl PlanetInfo {
             supported_combinations,
         }
     }
-} /*
+}
 impl Explorer {
-fn find_ai_partner(&mut self) -> Result<AIPartner, ()> {
-if !self.visited_stack.into {
-// Gets supported resources and combinations from the planet it is in
-if let Ok(()) = self
-.planet_channel
-.send(ExplorerToPlanet::SupportedResourceRequest {
-explorer_id: self.id,
-})
-{
-if let Ok(PlanetToExplorer::SupportedResourceResponse { resource_list }) =
-self.planet_channel.recv()
-{
-if let Ok(()) =
-self.planet_channel
-.send(ExplorerToPlanet::SupportedCombinationRequest {
-explorer_id: self.id,
-})
-{
-if let Ok(PlanetToExplorer::SupportedCombinationResponse {
-combination_list,
-}) = self.planet_channel.recv()
-{
-self.visited.insert(
-self.planet_id,
-PlanetInfo::new(resource_list, combination_list),
-);
-}
-}
-}
-}
-}
-//Gets neighbours from orchestrator
-if let Ok(()) = self
-.orchestrator_channel
-.send(ExplorerToOrchestrator::NeighborsRequest {
-explorer_id: self.id,
-current_planet_id: self.planet_id,
-})
-{
-if let Ok(OrchestratorToExplorer::NeighborsResponse { neighbors }) =
-self.orchestrator_channel.recv()
-{
-if neighbors
-.iter()
-.find(|id| !self.visited.contains_key(id))
-.unwra
-{}
-}
-}
+    fn find_ai_partner(&mut self) -> Result<AIPartner, ()> {
+        // if this planet is new
+        if self
+            .visited_stack
+            .iter()
+            .all(|planet| planet.id != self.planet_id)
+        {
+            // Gets supported resources and combinations from the planet it is in
+            if let Ok(()) = self
+                .planet_channel
+                .send(ExplorerToPlanet::SupportedResourceRequest {
+                    explorer_id: self.id,
+                })
+            {
+                if let Ok(PlanetToExplorer::SupportedResourceResponse { resource_list }) =
+                    self.planet_channel.recv()
+                {
+                    if let Ok(()) =
+                        self.planet_channel
+                            .send(ExplorerToPlanet::SupportedCombinationRequest {
+                                explorer_id: self.id,
+                            })
+                    {
+                        if let Ok(PlanetToExplorer::SupportedCombinationResponse {
+                            combination_list,
+                        }) = self.planet_channel.recv()
+                        {
+                            // Adds planet to the stack
+                            self.visited_stack.push(PlanetInfo::new(
+                                self.planet_id,
+                                resource_list,
+                                combination_list,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        //Gets neighbours from orchestrator
+        if let Ok(()) = self
+            .orchestrator_channel
+            .send(ExplorerToOrchestrator::NeighborsRequest {
+                explorer_id: self.id,
+                current_planet_id: self.planet_id,
+            })
+        {
+            if let Ok(OrchestratorToExplorer::NeighborsResponse { neighbors }) =
+                self.orchestrator_channel.recv()
+            {
+                // If there is any unvisited planet, then move there
+                if let Some(new_planet) = neighbors.iter().find(|neighbor_id| {
+                    self.visited_stack
+                        .iter()
+                        .all(|visited| **neighbor_id != visited.id)
+                }) {
+                    if let Ok(()) = self.orchestrator_channel.send(
+                        ExplorerToOrchestrator::TravelToPlanetRequest {
+                            explorer_id: self.id,
+                            current_planet_id: self.planet_id,
+                            dst_planet_id: *new_planet,
+                        },
+                    ) {
+                        // Must exit since it will receive a MoveToPlanet message
+                        // from the orchestrator
+                        return Err(());
+                    }
+                }
+            }
+        }
 
-Err(())
+        Err(())
+    }
 }
-}*/
 impl ExplorerTrait for Explorer {
     fn run(&mut self) {
         loop {
             self.try_recv_from_orchestrator_and_respond();
 
-            /*if self.auto_mode {
+            if self.auto_mode {
                 match self.find_ai_partner() {
                     Ok(ai_partner) => (),
                     Err(()) => (),
                 }
-            }*/
+            }
         }
     }
 
