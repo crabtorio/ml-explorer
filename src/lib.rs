@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
 use common_game::{
-    components::resource::{AIPartner, BasicResourceType, ComplexResourceType},
+    components::resource::{
+        BasicResource, BasicResourceType, ComplexResource, ComplexResourceRequest,
+        ComplexResourceType, GenericResource,
+    },
     protocols::{
         orchestrator_explorer::*,
         planet_explorer::{ExplorerToPlanet, PlanetToExplorer},
@@ -9,7 +12,7 @@ use common_game::{
     utils::ID,
 };
 use crossbeam_channel::{Receiver, Sender};
-use explorer_common::{Bag, BagContent};
+use explorer_common::{AiReturn, Bag, BagContent};
 use explorer_common::{Explorer as ExplorerTrait, logged_channel::LoggedChannel};
 pub struct Explorer {
     id: ID,
@@ -18,7 +21,8 @@ pub struct Explorer {
     auto_mode: bool,
     planet_channel: LoggedChannel<ExplorerToPlanet, PlanetToExplorer>,
     orchestrator_channel: LoggedChannel<ExplorerToOrchestrator<BagContent>, OrchestratorToExplorer>,
-    visited_stack: Vec<PlanetInfo>,
+    visited: HashSet<ID>,
+    planet_stack: Vec<PlanetInfo>,
 }
 struct PlanetInfo {
     id: ID,
@@ -39,45 +43,7 @@ impl PlanetInfo {
     }
 }
 impl Explorer {
-    fn find_ai_partner(&mut self) -> Result<AIPartner, ()> {
-        // if this planet is new
-        if self
-            .visited_stack
-            .iter()
-            .all(|planet| planet.id != self.planet_id)
-        {
-            // Gets supported resources and combinations from the planet it is in
-            if let Ok(()) = self
-                .planet_channel
-                .send(ExplorerToPlanet::SupportedResourceRequest {
-                    explorer_id: self.id,
-                })
-            {
-                if let Ok(PlanetToExplorer::SupportedResourceResponse { resource_list }) =
-                    self.planet_channel.recv()
-                {
-                    if let Ok(()) =
-                        self.planet_channel
-                            .send(ExplorerToPlanet::SupportedCombinationRequest {
-                                explorer_id: self.id,
-                            })
-                    {
-                        if let Ok(PlanetToExplorer::SupportedCombinationResponse {
-                            combination_list,
-                        }) = self.planet_channel.recv()
-                        {
-                            // Adds planet to the stack
-                            self.visited_stack.push(PlanetInfo::new(
-                                self.planet_id,
-                                resource_list,
-                                combination_list,
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        //Gets neighbours from orchestrator
+    fn neighbors_request(&self) -> Result<Vec<ID>, AiReturn> {
         if let Ok(()) = self
             .orchestrator_channel
             .send(ExplorerToOrchestrator::NeighborsRequest {
@@ -85,44 +51,135 @@ impl Explorer {
                 current_planet_id: self.planet_id,
             })
         {
-            if let Ok(OrchestratorToExplorer::NeighborsResponse { neighbors }) =
-                self.orchestrator_channel.recv()
-            {
-                // If there is any unvisited planet, then move there
-                if let Some(new_planet) = neighbors.iter().find(|neighbor_id| {
-                    self.visited_stack
-                        .iter()
-                        .all(|visited| **neighbor_id != visited.id)
-                }) {
-                    if let Ok(()) = self.orchestrator_channel.send(
-                        ExplorerToOrchestrator::TravelToPlanetRequest {
-                            explorer_id: self.id,
-                            current_planet_id: self.planet_id,
-                            dst_planet_id: *new_planet,
-                        },
-                    ) {
-                        // Must exit since it will receive a MoveToPlanet message
-                        // from the orchestrator
-                        return Err(());
+            if let Ok(message) = self.orchestrator_channel.recv() {
+                match message {
+                    OrchestratorToExplorer::NeighborsResponse { neighbors } => {
+                        return Ok(neighbors);
                     }
+                    OrchestratorToExplorer::StopExplorerAI => return Err(AiReturn::Stop),
+                    OrchestratorToExplorer::ResetExplorerAI => return Err(AiReturn::Reset),
+                    OrchestratorToExplorer::KillExplorer => return Err(AiReturn::Kill),
+                    _ => (),
                 }
             }
         }
-
-        Err(())
+        Err(AiReturn::Kill)
     }
-}
-impl ExplorerTrait for Explorer {
-    fn run(&mut self) {
-        loop {
-            self.try_recv_from_orchestrator_and_respond();
-
-            if self.auto_mode {
-                match self.find_ai_partner() {
-                    Ok(ai_partner) => (),
-                    Err(()) => (),
+    fn travel_to_planet_request(
+        &self,
+        dst_planet_id: ID,
+    ) -> Result<Option<Sender<ExplorerToPlanet>>, AiReturn> {
+        if let Ok(()) =
+            self.orchestrator_channel
+                .send(ExplorerToOrchestrator::TravelToPlanetRequest {
+                    explorer_id: self.id,
+                    current_planet_id: self.planet_id,
+                    dst_planet_id: dst_planet_id,
+                })
+        {
+            if let Ok(message) = self.orchestrator_channel.recv() {
+                match message {
+                    OrchestratorToExplorer::MoveToPlanet {
+                        sender_to_new_planet,
+                        planet_id,
+                    } => {
+                        return Ok(sender_to_new_planet);
+                    }
+                    OrchestratorToExplorer::StopExplorerAI => return Err(AiReturn::Stop),
+                    OrchestratorToExplorer::ResetExplorerAI => return Err(AiReturn::Reset),
+                    OrchestratorToExplorer::KillExplorer => return Err(AiReturn::Kill),
+                    _ => (),
                 }
             }
+        }
+        Err(AiReturn::Kill)
+    }
+    fn supported_resource_request(&self) -> Result<HashSet<BasicResourceType>, ()> {
+        if let Ok(()) = self
+            .planet_channel
+            .send(ExplorerToPlanet::SupportedResourceRequest {
+                explorer_id: self.id,
+            })
+        {
+            if let Ok(PlanetToExplorer::SupportedResourceResponse { resource_list }) =
+                self.planet_channel.recv()
+            {
+                return Ok(resource_list);
+            }
+        }
+        Err(())
+    }
+    fn supported_combination_request(&self) -> Result<HashSet<ComplexResourceType>, ()> {
+        if let Ok(()) = self
+            .planet_channel
+            .send(ExplorerToPlanet::SupportedCombinationRequest {
+                explorer_id: self.id,
+            })
+        {
+            if let Ok(PlanetToExplorer::SupportedCombinationResponse { combination_list }) =
+                self.planet_channel.recv()
+            {
+                return Ok(combination_list);
+            }
+        }
+        Err(())
+    }
+    fn generate_resource_request(&self, resource: BasicResourceType) -> Option<BasicResource> {
+        if let Ok(()) = self
+            .planet_channel
+            .send(ExplorerToPlanet::GenerateResourceRequest {
+                explorer_id: self.id,
+                resource: resource,
+            })
+        {
+            if let Ok(PlanetToExplorer::GenerateResourceResponse { resource }) =
+                self.planet_channel.recv()
+            {
+                return resource;
+            }
+        }
+        None
+    }
+    /*fn combine_resource_request(
+        &self,
+        resource_request: ComplexResourceRequest,
+    ) -> Result<ComplexResource, (String, GenericResource, GenericResource)> {
+        if let Ok(()) = self
+            .planet_channel
+            .send(ExplorerToPlanet::CombineResourceRequest {
+                explorer_id: self.id,
+                msg: match  ,
+            })
+        {
+            if let Ok(PlanetToExplorer::CombineResourceResponse { complex_response }) =
+                self.planet_channel.recv()
+            {
+                return complex_response;
+            }
+        }
+        panic!("");
+    }*/
+}
+impl ExplorerTrait for Explorer {
+    fn new(
+        id: ID,
+        bag: Bag,
+        planet_id: ID,
+        planet_channel: LoggedChannel<ExplorerToPlanet, PlanetToExplorer>,
+        orchestrator_channel: LoggedChannel<
+            ExplorerToOrchestrator<BagContent>,
+            OrchestratorToExplorer,
+        >,
+    ) -> Self {
+        Self {
+            id,
+            bag,
+            planet_id,
+            auto_mode: false,
+            planet_channel,
+            orchestrator_channel,
+            planet_stack: Vec::new(),
+            visited: HashSet::new(),
         }
     }
 
@@ -150,27 +207,6 @@ impl ExplorerTrait for Explorer {
         self.auto_mode = mode;
     }
 
-    fn new(
-        id: ID,
-        bag: Bag,
-        planet_id: ID,
-        planet_channel: LoggedChannel<ExplorerToPlanet, PlanetToExplorer>,
-        orchestrator_channel: LoggedChannel<
-            ExplorerToOrchestrator<BagContent>,
-            OrchestratorToExplorer,
-        >,
-    ) -> Self {
-        Self {
-            id,
-            bag,
-            planet_id,
-            auto_mode: false,
-            planet_channel,
-            orchestrator_channel,
-            visited_stack: Vec::new(),
-        }
-    }
-
     fn get_planet_channel(&self) -> LoggedChannel<ExplorerToPlanet, PlanetToExplorer> {
         self.planet_channel.clone()
     }
@@ -192,6 +228,91 @@ impl ExplorerTrait for Explorer {
     fn set_orchestrator_channel_rx(&mut self, rx: Receiver<OrchestratorToExplorer>) {
         self.orchestrator_channel.set_receiver(rx);
     }
+
+    fn explorer_ai(&mut self) -> explorer_common::AiReturn {
+        // if this planet is new
+        if self.visited.contains(&self.id) {
+            // Gets supported resources and combinations from the planet it is in
+            if let Ok(()) = self
+                .planet_channel
+                .send(ExplorerToPlanet::SupportedResourceRequest {
+                    explorer_id: self.id,
+                })
+            {
+                if let Ok(PlanetToExplorer::SupportedResourceResponse { resource_list }) =
+                    self.planet_channel.recv()
+                {
+                    if let Ok(()) =
+                        self.planet_channel
+                            .send(ExplorerToPlanet::SupportedCombinationRequest {
+                                explorer_id: self.id,
+                            })
+                    {
+                        if let Ok(PlanetToExplorer::SupportedCombinationResponse {
+                            combination_list,
+                        }) = self.planet_channel.recv()
+                        {
+                            // Adds planet to the stack
+                            self.planet_stack.push(PlanetInfo::new(
+                                self.planet_id,
+                                resource_list,
+                                combination_list,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        //Gets neighbours from orchestrator
+        if let Ok(()) = self
+            .orchestrator_channel
+            .send(ExplorerToOrchestrator::NeighborsRequest {
+                explorer_id: self.id,
+                current_planet_id: self.planet_id,
+            })
+        {
+            if let Ok(OrchestratorToExplorer::NeighborsResponse { neighbors }) =
+                self.orchestrator_channel.recv()
+            {
+                // If there is any unvisited planet, then move there
+                if let Some(new_planet) = neighbors.iter().find(|neighbor_id| {
+                    self.planet_stack
+                        .iter()
+                        .all(|visited| **neighbor_id != visited.id)
+                }) {
+                    if let Ok(()) = self.orchestrator_channel.send(
+                        ExplorerToOrchestrator::TravelToPlanetRequest {
+                            explorer_id: self.id,
+                            current_planet_id: self.planet_id,
+                            dst_planet_id: *new_planet,
+                        },
+                    ) {
+                        if let Ok(OrchestratorToExplorer::MoveToPlanet {
+                            sender_to_new_planet,
+                            planet_id,
+                        }) = self.orchestrator_channel.recv()
+                        {
+                            self.set_planet_id(planet_id);
+                            if let Some(new_sender) = sender_to_new_planet {
+                                self.set_planet_channel_tx(new_sender);
+                                if let Ok(()) = self.get_orchestrator_channel().send(
+                                    ExplorerToOrchestrator::MovedToPlanetResult {
+                                        explorer_id: self.get_id(),
+                                        planet_id,
+                                    },
+                                ) {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        AiReturn::Kill
+    }
+
+    fn reset(&mut self) {
+        todo!()
+    }
 }
 
 // The tested functions were moved to explorer_common
@@ -200,7 +321,7 @@ mod tests {
     use std::{collections::HashSet, thread};
 
     use common_game::{
-        components::resource::ComplexResourceType,
+        components::resource::ComplexResourceType, logging::Participant,
         protocols::planet_explorer::PlanetToExplorer::SupportedCombinationResponse,
     };
 
@@ -234,14 +355,21 @@ mod tests {
                 planet_channel: LoggedChannel::new(
                     rx_planet_explorer,
                     tx_explorer_planet,
-                    "explorer".into(),
+                    Participant::new(common_game::logging::ActorType::Explorer, 0 as ID),
+                    Participant::new(common_game::logging::ActorType::Planet, 0 as ID),
+                    common_game::logging::EventType::MessageExplorerToPlanet,
+                    common_game::logging::EventType::MessagePlanetToExplorer,
                 ),
                 orchestrator_channel: LoggedChannel::new(
                     rx_orchestrator_explorer,
                     tx_explorer_orchestrator,
-                    "explorer".into(),
+                    Participant::new(common_game::logging::ActorType::Explorer, 0 as ID),
+                    Participant::new(common_game::logging::ActorType::Orchestrator, 0 as ID),
+                    common_game::logging::EventType::MessageExplorerToOrchestrator,
+                    common_game::logging::EventType::MessageOrchestratorToExplorer,
                 ),
-                visited_stack: Vec::new(),
+                planet_stack: Vec::new(),
+                visited: HashSet::new(),
             };
 
             Self {
