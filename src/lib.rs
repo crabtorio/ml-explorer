@@ -1,7 +1,16 @@
-use std::collections::HashSet;
+use std::{
+    arch::x86_64::_mm_undefined_si128,
+    collections::{HashMap, HashSet},
+};
 
 use common_game::{
-    components::resource::{BasicResource, BasicResourceType, ComplexResourceType},
+    components::resource::{
+        BasicResource,
+        BasicResourceType::{self, Carbon},
+        ComplexResourceRequest,
+        ComplexResourceType::{self, Diamond},
+        GenericResource, ResourceType,
+    },
     protocols::{
         orchestrator_explorer::*,
         planet_explorer::{ExplorerToPlanet, PlanetToExplorer},
@@ -11,6 +20,8 @@ use common_game::{
 use crossbeam_channel::{Receiver, Sender};
 use explorer_common::{AiReturn, Bag, BagContent};
 use explorer_common::{Explorer as ExplorerTrait, logged_channel::LoggedChannel};
+const GOAL: ComplexResourceType = Diamond;
+const RECEPIE: (BasicResourceType, BasicResourceType) = (Carbon, Carbon);
 pub struct Explorer {
     id: ID,
     bag: Bag,
@@ -19,25 +30,7 @@ pub struct Explorer {
     planet_channel: LoggedChannel<ExplorerToPlanet, PlanetToExplorer>,
     orchestrator_channel: LoggedChannel<ExplorerToOrchestrator<BagContent>, OrchestratorToExplorer>,
     visited: HashSet<ID>,
-    planet_stack: Vec<PlanetInfo>,
-}
-struct PlanetInfo {
-    id: ID,
-    supported_resources: HashSet<BasicResourceType>,
-    supported_combinations: HashSet<ComplexResourceType>,
-}
-impl PlanetInfo {
-    fn new(
-        id: ID,
-        supported_resources: HashSet<BasicResourceType>,
-        supported_combinations: HashSet<ComplexResourceType>,
-    ) -> Self {
-        Self {
-            id,
-            supported_resources,
-            supported_combinations,
-        }
-    }
+    planet_stack: Vec<ID>,
 }
 impl Explorer {
     fn neighbors_request(&self) -> Result<Vec<ID>, AiReturn> {
@@ -131,37 +124,21 @@ impl Explorer {
                             self.planet_id = planet_id;
                             return Ok(true);
                         } else {
-                            return Ok(false);
+                            return Ok(false); // the planet is dead
                         }
                     }
                     OrchestratorToExplorer::StopExplorerAI => return Err(AiReturn::Stop),
                     OrchestratorToExplorer::ResetExplorerAI => return Err(AiReturn::Reset),
                     OrchestratorToExplorer::KillExplorer => return Err(AiReturn::Kill),
-                    _ => (),
+                    _ => return Err(AiReturn::Kill),
                 }
+            } else {
+                return Err(AiReturn::Kill);
             }
+        } else {
+            return Err(AiReturn::Kill);
         }
-        Err(AiReturn::Kill)
     }
-    /*fn combine_resource_request(
-        &self,
-        resource_request: ComplexResourceRequest,
-    ) -> Result<ComplexResource, (String, GenericResource, GenericResource)> {
-        if let Ok(()) = self
-            .planet_channel
-            .send(ExplorerToPlanet::CombineResourceRequest {
-                explorer_id: self.id,
-                msg: match  ,
-            })
-        {
-            if let Ok(PlanetToExplorer::CombineResourceResponse { complex_response }) =
-                self.planet_channel.recv()
-            {
-                return complex_response;
-            }
-        }
-        panic!("");
-    }*/
 }
 impl ExplorerTrait for Explorer {
     fn new(
@@ -233,49 +210,137 @@ impl ExplorerTrait for Explorer {
     }
 
     fn explorer_ai(&mut self) -> explorer_common::AiReturn {
-        // if this planet is new
-        if !self.visited.contains(&self.planet_id) {
-            // Gets supported resources and combinations from the planet it is in
-            // and adds it to the stack
-            self.planet_stack.push(PlanetInfo::new(
-                self.planet_id,
-                match self.supported_resource_request() {
-                    Ok(supported_resource) => supported_resource,
-                    Err(ai_return) => return ai_return,
-                },
-                match self.supported_combination_request() {
-                    Ok(supported_combination) => supported_combination,
-                    Err(ai_return) => return ai_return,
-                },
-            ));
-            // Marks planet as visited
+        loop {
+            // If planet is new set it as visited (doesn't need check as worst case it re-enters it, which is safe)
             self.visited.insert(self.planet_id);
-        }
-        // Gets current planet's neighbours from orchestrator
-        // and move to an unvisited planet, if there is one
-        match self.neighbors_request() {
-            Ok(neighbors) => {
-                if let Some(unvisited_planet) = neighbors
-                    .iter()
-                    .find(|neighbor_id| !self.visited.contains(*neighbor_id))
-                {
-                    // Move to planet
-                    match self.travel_to_planet_request(*unvisited_planet) {
-                        Ok(did_it_move) => {
-                            if did_it_move {
-                            } else {
-                                // If it didn't move then backtrack
+
+            // Get planet's supported resources and combinations
+            let supported_resources = {
+                match self.supported_resource_request() {
+                    Ok(supported_resources) => supported_resources,
+                    Err(ai_return) => return ai_return,
+                }
+            };
+            let supported_combinations = {
+                match self.supported_combination_request() {
+                    Ok(supported_combinations) => supported_combinations,
+                    Err(ai_return) => return ai_return,
+                }
+            };
+
+            // Check if there is anything needed given the goal (Diamond)
+            if self.bag.contains(ResourceType::Basic(Carbon)) >= 2 {
+                if supported_combinations.contains(&Diamond) {
+                    if let Ok(()) =
+                        self.planet_channel
+                            .send(ExplorerToPlanet::CombineResourceRequest {
+                                explorer_id: self.id,
+                                msg: ComplexResourceRequest::Diamond(
+                                    {
+                                        if let Ok(GenericResource::BasicResources(
+                                            BasicResource::Carbon(carbon),
+                                        )) = self.bag.take_resource(ResourceType::Basic(Carbon))
+                                        {
+                                            carbon
+                                        } else {
+                                            continue;
+                                        }
+                                    },
+                                    {
+                                        if let Ok(GenericResource::BasicResources(
+                                            BasicResource::Carbon(carbon),
+                                        )) = self.bag.take_resource(ResourceType::Basic(Carbon))
+                                        {
+                                            carbon
+                                        } else {
+                                            continue;
+                                        }
+                                    },
+                                ),
+                            })
+                    {
+                        // Missing response
+                        if let Ok(PlanetToExplorer::CombineResourceResponse { complex_response }) =
+                            self.planet_channel.recv()
+                        {
+                            match complex_response {
+                                Ok(diamond) => {
+                                    println!("I GOT THE DIAMOND!!!!");
+                                }
+                                Err((_, carbon1, carbon2)) => {
+                                    // Error ignored
+                                    self.bag.add_resource(carbon1);
+                                    self.bag.add_resource(carbon2);
+                                }
                             }
+                        } else {
+                            // Carbon theft
                         }
+                    }
+                }
+            } else {
+                // Try to get Carbon
+                if supported_resources.contains(&Carbon) {
+                    match self.generate_resource_request(Carbon) {
+                        Ok(Some(carbon)) => self
+                            .bag
+                            .add_resource(GenericResource::BasicResources(carbon)),
+                        Ok(None) => (), // Missed the charged energy cell, do nothing
                         Err(ai_return) => return ai_return,
                     }
                 }
             }
-            Err(ai_return) => return ai_return,
-        }
-        AiReturn::Kill
-    }
 
+            // If any neighbor hasn't been visited, move there
+            match self.neighbors_request() {
+                Ok(neighbors) => {
+                    if !neighbors.is_empty() {
+                        if let Some(unvisited_planet) = neighbors.iter().find(|neighbor| {
+                            self.visited
+                                .iter()
+                                .all(|visited_planet| *neighbor != visited_planet)
+                        }) {
+                            let old_planet_id = self.planet_id;
+                            match self.travel_to_planet_request(*unvisited_planet) {
+                                Ok(did_it_move) => {
+                                    if did_it_move {
+                                        self.planet_stack.push(old_planet_id);
+                                    } else {
+                                        continue; // If the planet is dead, then the next iteration will not have it in the neighbors
+                                    }
+                                }
+                                Err(ai_return) => return ai_return,
+                            }
+                        } else {
+                            // If no neighbors are new and the stack is empty, then we have explored through the whole galaxy
+                            // And since the objective hasn't been fullfilled yet, empty the visited map and explore it again
+                            if self.planet_stack.is_empty() {
+                                self.visited.clear();
+                            } else {
+                                // If no neighbors are new and there is stuff on the stack, backtrack
+                                let dst = self.planet_stack.pop().unwrap(); // Cannot panic it was checked to be non-empty
+                                match self.travel_to_planet_request(dst) {
+                                    Ok(did_we_move) => {
+                                        if !did_we_move {
+                                            // The planet is dead, so we're cut out from the way we came from
+                                            // Wipe visited and start exploring again
+                                            self.visited.clear();
+                                            self.planet_stack.clear();
+                                        }
+                                    }
+                                    Err(ai_return) => return ai_return,
+                                }
+                            }
+                        }
+                    } else {
+                        // If there are no neighbors then the explorer might as well die
+                        return AiReturn::Kill;
+                    }
+                }
+                Err(ai_return) => return ai_return,
+            }
+        }
+    }
     fn reset(&mut self) {
         self.planet_stack.clear();
         self.visited.clear();
