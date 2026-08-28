@@ -18,7 +18,7 @@ use crossbeam_channel::{Receiver, Sender};
 use explorer_common::{AiReturn, Bag, BagContent};
 use explorer_common::{Explorer as ExplorerTrait, logged_channel::LoggedChannel};
 const GOAL: ComplexResourceType = Diamond;
-const RECEPIE: (BasicResourceType, BasicResourceType) = (Carbon, Carbon);
+const RECIPE: (BasicResourceType, BasicResourceType) = (Carbon, Carbon);
 pub struct Explorer {
     id: ID,
     bag: Bag,
