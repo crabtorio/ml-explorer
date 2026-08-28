@@ -62,36 +62,7 @@ impl Explorer {
         }
         Err(AiReturn::Kill)
     }
-    fn travel_to_planet_request(
-        &self,
-        dst_planet_id: ID,
-    ) -> Result<Option<Sender<ExplorerToPlanet>>, AiReturn> {
-        if let Ok(()) =
-            self.orchestrator_channel
-                .send(ExplorerToOrchestrator::TravelToPlanetRequest {
-                    explorer_id: self.id,
-                    current_planet_id: self.planet_id,
-                    dst_planet_id: dst_planet_id,
-                })
-        {
-            if let Ok(message) = self.orchestrator_channel.recv() {
-                match message {
-                    OrchestratorToExplorer::MoveToPlanet {
-                        sender_to_new_planet,
-                        planet_id,
-                    } => {
-                        return Ok(sender_to_new_planet);
-                    }
-                    OrchestratorToExplorer::StopExplorerAI => return Err(AiReturn::Stop),
-                    OrchestratorToExplorer::ResetExplorerAI => return Err(AiReturn::Reset),
-                    OrchestratorToExplorer::KillExplorer => return Err(AiReturn::Kill),
-                    _ => (),
-                }
-            }
-        }
-        Err(AiReturn::Kill)
-    }
-    fn supported_resource_request(&self) -> Result<HashSet<BasicResourceType>, ()> {
+    fn supported_resource_request(&self) -> Result<HashSet<BasicResourceType>, AiReturn> {
         if let Ok(()) = self
             .planet_channel
             .send(ExplorerToPlanet::SupportedResourceRequest {
@@ -104,9 +75,9 @@ impl Explorer {
                 return Ok(resource_list);
             }
         }
-        Err(())
+        Err(AiReturn::Kill)
     }
-    fn supported_combination_request(&self) -> Result<HashSet<ComplexResourceType>, ()> {
+    fn supported_combination_request(&self) -> Result<HashSet<ComplexResourceType>, AiReturn> {
         if let Ok(()) = self
             .planet_channel
             .send(ExplorerToPlanet::SupportedCombinationRequest {
@@ -119,9 +90,12 @@ impl Explorer {
                 return Ok(combination_list);
             }
         }
-        Err(())
+        Err(AiReturn::Kill)
     }
-    fn generate_resource_request(&self, resource: BasicResourceType) -> Option<BasicResource> {
+    fn generate_resource_request(
+        &self,
+        resource: BasicResourceType,
+    ) -> Result<Option<BasicResource>, AiReturn> {
         if let Ok(()) = self
             .planet_channel
             .send(ExplorerToPlanet::GenerateResourceRequest {
@@ -132,10 +106,42 @@ impl Explorer {
             if let Ok(PlanetToExplorer::GenerateResourceResponse { resource }) =
                 self.planet_channel.recv()
             {
-                return resource;
+                return Ok(resource);
             }
         }
-        None
+        Err(AiReturn::Kill)
+    }
+    fn travel_to_planet_request(&mut self, dst_planet_id: ID) -> Result<bool, AiReturn> {
+        if let Ok(()) =
+            self.orchestrator_channel
+                .send(ExplorerToOrchestrator::TravelToPlanetRequest {
+                    explorer_id: self.id,
+                    current_planet_id: self.id,
+                    dst_planet_id,
+                })
+        {
+            if let Ok(message) = self.orchestrator_channel.recv() {
+                match message {
+                    OrchestratorToExplorer::MoveToPlanet {
+                        sender_to_new_planet,
+                        planet_id,
+                    } => {
+                        if let Some(new_sender) = sender_to_new_planet {
+                            self.set_planet_channel_tx(new_sender);
+                            self.planet_id = planet_id;
+                            return Ok(true);
+                        } else {
+                            return Ok(false);
+                        }
+                    }
+                    OrchestratorToExplorer::StopExplorerAI => return Err(AiReturn::Stop),
+                    OrchestratorToExplorer::ResetExplorerAI => return Err(AiReturn::Reset),
+                    OrchestratorToExplorer::KillExplorer => return Err(AiReturn::Kill),
+                    _ => (),
+                }
+            }
+        }
+        Err(AiReturn::Kill)
     }
     /*fn combine_resource_request(
         &self,
@@ -230,29 +236,49 @@ impl ExplorerTrait for Explorer {
         // if this planet is new
         if !self.visited.contains(&self.planet_id) {
             // Gets supported resources and combinations from the planet it is in
-            if let (Ok(supported_resources), Ok(supported_combination)) = (
-                self.supported_resource_request(),
-                self.supported_combination_request(),
-            ) {
-                // Adds planet to the stack
-                self.planet_stack.push(PlanetInfo::new(
-                    self.planet_id,
-                    supported_resources,
-                    supported_combination,
-                ));
-                // Marks planet as visited
-                self.visited.insert(self.planet_id);
-            }
+            // and adds it to the stack
+            self.planet_stack.push(PlanetInfo::new(
+                self.planet_id,
+                match self.supported_resource_request() {
+                    Ok(supported_resource) => supported_resource,
+                    Err(ai_return) => return ai_return,
+                },
+                match self.supported_combination_request() {
+                    Ok(supported_combination) => supported_combination,
+                    Err(ai_return) => return ai_return,
+                },
+            ));
+            // Marks planet as visited
+            self.visited.insert(self.planet_id);
         }
         // Gets current planet's neighbours from orchestrator
         // and move to an unvisited planet, if there is one
-        if let Ok(neighbors) = self.neighbors_request() {}
-
+        match self.neighbors_request() {
+            Ok(neighbors) => {
+                if let Some(unvisited_planet) = neighbors
+                    .iter()
+                    .find(|neighbor_id| !self.visited.contains(*neighbor_id))
+                {
+                    // Move to planet
+                    match self.travel_to_planet_request(*unvisited_planet) {
+                        Ok(did_it_move) => {
+                            if did_it_move {
+                            } else {
+                                // If it didn't move then backtrack
+                            }
+                        }
+                        Err(ai_return) => return ai_return,
+                    }
+                }
+            }
+            Err(ai_return) => return ai_return,
+        }
         AiReturn::Kill
     }
 
     fn reset(&mut self) {
-        todo!()
+        self.planet_stack.clear();
+        self.visited.clear();
     }
 }
 
