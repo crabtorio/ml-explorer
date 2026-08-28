@@ -80,6 +80,7 @@ dependencies = [
  "common-game",
  "crossbeam-channel",
  "explorer-common",
+ "log",
 ]
 
 [[package]]

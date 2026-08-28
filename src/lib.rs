@@ -119,6 +119,17 @@ impl Explorer {
                         if let Some(new_sender) = sender_to_new_planet {
                             self.set_planet_channel_tx(new_sender);
                             self.planet_id = planet_id;
+
+                            if let Ok(()) = self.orchestrator_channel.send(
+                                ExplorerToOrchestrator::MovedToPlanetResult {
+                                    explorer_id: self.id,
+                                    planet_id,
+                                },
+                            ) {
+                            } else {
+                                return Err(AiReturn::Kill);
+                            }
+
                             return Ok(true);
                         } else {
                             return Ok(false); // the planet is dead
