@@ -228,41 +228,59 @@ impl ExplorerTrait for Explorer {
             // Check if there is anything needed given the goal (Diamond)
             if self.bag.contains(ResourceType::Basic(Carbon)) >= 2 {
                 if supported_combinations.contains(&Diamond) {
-                    // (Result<GenericResource, ()>, Result<GenericResource, ()>)
-                    if let (
-                        Ok(GenericResource::BasicResources(BasicResource::Carbon(carbon1))),
-                        Ok(GenericResource::BasicResources(BasicResource::Carbon(carbon2))),
-                    ) = (
-                        self.bag.take_resource(ResourceType::Basic(Carbon)),
-                        self.bag.take_resource(ResourceType::Basic(Carbon)),
-                    ) {
-                        if let Ok(()) =
-                            self.planet_channel
-                                .send(ExplorerToPlanet::CombineResourceRequest {
-                                    explorer_id: self.id,
-                                    msg: ComplexResourceRequest::Diamond(carbon1, carbon2),
-                                })
-                        {
-                            // Missing response
-                            if let Ok(PlanetToExplorer::CombineResourceResponse {
-                                complex_response,
-                            }) = self.planet_channel.recv()
+                    let carbon1 = self.bag.take_resource(ResourceType::Basic(Carbon));
+                    let carbon2 = self.bag.take_resource(ResourceType::Basic(Carbon));
+
+                    match (carbon1, carbon2) {
+                        (
+                            Ok(GenericResource::BasicResources(BasicResource::Carbon(carbon1))),
+                            Ok(GenericResource::BasicResources(BasicResource::Carbon(carbon2))),
+                        ) => {
+                            if let Ok(()) =
+                                self.planet_channel
+                                    .send(ExplorerToPlanet::CombineResourceRequest {
+                                        explorer_id: self.id,
+                                        msg: ComplexResourceRequest::Diamond(carbon1, carbon2),
+                                    })
                             {
-                                match complex_response {
-                                    Ok(diamond) => {
-                                        println!("I GOT THE DIAMOND!!!!");
-                                        return AiReturn::Kill;
+                                // Missing response
+                                if let Ok(PlanetToExplorer::CombineResourceResponse {
+                                    complex_response,
+                                }) = self.planet_channel.recv()
+                                {
+                                    match complex_response {
+                                        Ok(diamond) => {
+                                            println!("I GOT THE DIAMOND!!!!");
+                                            return AiReturn::Kill;
+                                        }
+                                        Err((_, carbon1, carbon2)) => {
+                                            // Error ignored
+                                            self.bag.add_resource(carbon1);
+                                            self.bag.add_resource(carbon2);
+                                        }
                                     }
-                                    Err((_, carbon1, carbon2)) => {
-                                        // Error ignored
-                                        self.bag.add_resource(carbon1);
-                                        self.bag.add_resource(carbon2);
-                                    }
+                                } else {
+                                    // Carbon theft
                                 }
-                            } else {
-                                // Carbon theft
                             }
                         }
+                        (
+                            Ok(GenericResource::BasicResources(BasicResource::Carbon(carbon1))),
+                            Err(_),
+                        ) => {
+                            self.bag.add_resource(GenericResource::BasicResources(
+                                BasicResource::Carbon(carbon1),
+                            ));
+                        }
+                        (
+                            Err(_),
+                            Ok(GenericResource::BasicResources(BasicResource::Carbon(carbon2))),
+                        ) => {
+                            self.bag.add_resource(GenericResource::BasicResources(
+                                BasicResource::Carbon(carbon2),
+                            ));
+                        }
+                        _ => {}
                     }
                 }
             } else {
